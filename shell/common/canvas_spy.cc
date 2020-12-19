@@ -51,9 +51,16 @@ bool DidDrawCanvas::onDoSaveBehind(const SkRect* bounds) {
 
 void DidDrawCanvas::willRestore() {}
 
+#ifdef SK_SUPPORT_LEGACY_CANVASMATRIX33
 void DidDrawCanvas::didConcat(const SkMatrix& matrix) {}
-
 void DidDrawCanvas::didSetMatrix(const SkMatrix& matrix) {}
+#endif
+
+void DidDrawCanvas::didConcat44(const SkM44&) {}
+
+void DidDrawCanvas::didScale(SkScalar, SkScalar) {}
+
+void DidDrawCanvas::didTranslate(SkScalar, SkScalar) {}
 
 void DidDrawCanvas::onClipRect(const SkRect& rect,
                                SkClipOp op,
@@ -118,35 +125,6 @@ void DidDrawCanvas::onDrawPath(const SkPath& path, const SkPaint& paint) {
   MarkDrawIfNonTransparentPaint(paint);
 }
 
-void DidDrawCanvas::onDrawBitmap(const SkBitmap& bitmap,
-                                 SkScalar x,
-                                 SkScalar y,
-                                 const SkPaint* paint) {
-  did_draw_ = true;
-}
-
-void DidDrawCanvas::onDrawBitmapRect(const SkBitmap& bitmap,
-                                     const SkRect* src,
-                                     const SkRect& dst,
-                                     const SkPaint* paint,
-                                     SrcRectConstraint constraint) {
-  did_draw_ = true;
-}
-
-void DidDrawCanvas::onDrawBitmapNine(const SkBitmap& bitmap,
-                                     const SkIRect& center,
-                                     const SkRect& dst,
-                                     const SkPaint* paint) {
-  did_draw_ = true;
-}
-
-void DidDrawCanvas::onDrawBitmapLattice(const SkBitmap& bitmap,
-                                        const Lattice& lattice,
-                                        const SkRect& dst,
-                                        const SkPaint* paint) {
-  did_draw_ = true;
-}
-
 void DidDrawCanvas::onDrawImage(const SkImage* image,
                                 SkScalar left,
                                 SkScalar top,
@@ -195,8 +173,6 @@ void DidDrawCanvas::onDrawDrawable(SkDrawable* drawable,
 }
 
 void DidDrawCanvas::onDrawVerticesObject(const SkVertices* vertices,
-                                         const SkVertices::Bone bones[],
-                                         int boneCount,
                                          SkBlendMode bmode,
                                          const SkPaint& paint) {
   MarkDrawIfNonTransparentPaint(paint);

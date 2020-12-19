@@ -12,6 +12,10 @@ ShaderMaskLayer::ShaderMaskLayer(sk_sp<SkShader> shader,
     : shader_(shader), mask_rect_(mask_rect), blend_mode_(blend_mode) {}
 
 void ShaderMaskLayer::Preroll(PrerollContext* context, const SkMatrix& matrix) {
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
+  CheckForChildLayerBelow(context);
+#endif
+
   Layer::AutoPrerollSaveLayerState save =
       Layer::AutoPrerollSaveLayerState::Create(context);
   ContainerLayer::Preroll(context, matrix);
@@ -19,7 +23,7 @@ void ShaderMaskLayer::Preroll(PrerollContext* context, const SkMatrix& matrix) {
 
 void ShaderMaskLayer::Paint(PaintContext& context) const {
   TRACE_EVENT0("flutter", "ShaderMaskLayer::Paint");
-  FML_DCHECK(needs_painting());
+  FML_DCHECK(needs_painting(context));
 
   Layer::AutoSaveLayer save =
       Layer::AutoSaveLayer::Create(context, paint_bounds(), nullptr);

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.12
 part of engine;
 
 /// The maximum [semanticsActivationAttempts] before we give up waiting for
@@ -48,8 +49,8 @@ class SemanticsHelper {
     return _semanticsEnabler.shouldEnableSemantics(event);
   }
 
-  html.Element prepareAccesibilityPlaceholder() {
-    return _semanticsEnabler.prepareAccesibilityPlaceholder();
+  html.Element prepareAccessibilityPlaceholder() {
+    return _semanticsEnabler.prepareAccessibilityPlaceholder();
   }
 }
 
@@ -77,15 +78,15 @@ abstract class SemanticsEnabler {
   /// should be forwarded to the framework.
   bool tryEnableSemantics(html.Event event);
 
-  /// Creates the placeholder for accesibility.
+  /// Creates the placeholder for accessibility.
   ///
   /// Puts it inside the glasspane.
   ///
   /// On focus the element announces that accessibility can be enabled by
   /// tapping/clicking. (Announcement depends on the assistive technology)
-  html.Element prepareAccesibilityPlaceholder();
+  html.Element prepareAccessibilityPlaceholder();
 
-  /// Whether platform is still consisering enabling semantics.
+  /// Whether platform is still considering enabling semantics.
   ///
   /// At this stage a relevant set of events are always assessed to see if
   /// they activate the semantics.
@@ -106,10 +107,10 @@ class DesktopSemanticsEnabler extends SemanticsEnabler {
   /// request to activate semantics, and a second time by Flutter's gesture
   /// recognizers.
   @visibleForTesting
-  Timer semanticsActivationTimer;
+  Timer? semanticsActivationTimer;
 
   /// A temporary placeholder used to capture a request to activate semantics.
-  html.Element _semanticsPlaceholder;
+  html.Element? _semanticsPlaceholder;
 
   /// The number of events we processed that could potentially activate
   /// semantics.
@@ -127,7 +128,7 @@ class DesktopSemanticsEnabler extends SemanticsEnabler {
   @override
   bool tryEnableSemantics(html.Event event) {
     if (_schedulePlaceholderRemoval) {
-      _semanticsPlaceholder.remove();
+      _semanticsPlaceholder!.remove();
       _semanticsPlaceholder = null;
       semanticsActivationTimer = null;
       return true;
@@ -188,12 +189,12 @@ class DesktopSemanticsEnabler extends SemanticsEnabler {
   }
 
   @override
-  html.Element prepareAccesibilityPlaceholder() {
-    _semanticsPlaceholder = html.Element.tag('flt-semantics-placeholder');
+  html.Element prepareAccessibilityPlaceholder() {
+    final html.Element placeholder = _semanticsPlaceholder = html.Element.tag('flt-semantics-placeholder');
 
     // Only listen to "click" because other kinds of events are reported via
     // PointerBinding.
-    _semanticsPlaceholder.addEventListener('click', (html.Event event) {
+    placeholder.addEventListener('click', (html.Event event) {
       tryEnableSemantics(event);
     }, true);
 
@@ -202,18 +203,18 @@ class DesktopSemanticsEnabler extends SemanticsEnabler {
     // page receives focus. 'tab-index' makes sure the button is the first
     // target of tab. 'aria-label' is used to define the placeholder message
     // to the assistive technology user.
-    _semanticsPlaceholder
+    placeholder
       ..setAttribute('role', 'button')
       ..setAttribute('aria-live', 'true')
       ..setAttribute('tabindex', '0')
       ..setAttribute('aria-label', placeholderMessage);
-    _semanticsPlaceholder.style
+    placeholder.style
       ..position = 'absolute'
       ..left = '-1px'
       ..top = '-1px'
       ..width = '1px'
       ..height = '1px';
-    return _semanticsPlaceholder;
+    return placeholder;
   }
 }
 
@@ -229,10 +230,10 @@ class MobileSemanticsEnabler extends SemanticsEnabler {
   /// a request to activate semantics, and a second time by Flutter's gesture
   /// recognizers.
   @visibleForTesting
-  Timer semanticsActivationTimer;
+  Timer? semanticsActivationTimer;
 
   /// A temporary placeholder used to capture a request to activate semantics.
-  html.Element _semanticsPlaceholder;
+  html.Element? _semanticsPlaceholder;
 
   /// The number of events we processed that could potentially activate
   /// semantics.
@@ -255,10 +256,13 @@ class MobileSemanticsEnabler extends SemanticsEnabler {
   @override
   bool tryEnableSemantics(html.Event event) {
     if (_schedulePlaceholderRemoval) {
-      final bool removeNow =
-          (browserEngine != BrowserEngine.webkit || event.type == 'touchend');
+      // The event type can also be click for VoiceOver.
+      final bool removeNow = (browserEngine != BrowserEngine.webkit ||
+          event.type == 'touchend' ||
+          event.type == 'pointerup' ||
+          event.type == 'click');
       if (removeNow) {
-        _semanticsPlaceholder.remove();
+        _semanticsPlaceholder!.remove();
         _semanticsPlaceholder = null;
         semanticsActivationTimer = null;
       }
@@ -279,10 +283,16 @@ class MobileSemanticsEnabler extends SemanticsEnabler {
       return true;
     }
 
+    // ios-safari browsers which starts sending `pointer` events instead of
+    // `touch` events. (Tested with 12.1 which uses touch events vs 13.5
+    // which uses pointer events.)
     const Set<String> kInterestingEventTypes = <String>{
       'click',
       'touchstart',
       'touchend',
+      'pointerdown',
+      'pointermove',
+      'pointerup',
     };
 
     if (!kInterestingEventTypes.contains(event.type)) {
@@ -324,29 +334,34 @@ class MobileSemanticsEnabler extends SemanticsEnabler {
 
       switch (event.type) {
         case 'click':
-          final html.MouseEvent click = event;
+          final html.MouseEvent click = event as html.MouseEvent;
           activationPoint = click.offset;
           break;
         case 'touchstart':
         case 'touchend':
-          final html.TouchEvent touch = event;
-          activationPoint = touch.changedTouches.first.client;
+          final html.TouchEvent touch = event as html.TouchEvent;
+          activationPoint = touch.changedTouches!.first.client;
+          break;
+        case 'pointerdown':
+        case 'pointerup':
+          final html.PointerEvent touch = event as html.PointerEvent;
+          activationPoint = new html.Point(touch.client.x, touch.client.y);
           break;
         default:
           // The event is not relevant, forward to framework as normal.
           return true;
       }
 
-      assert(activationPoint != null);
-
       final html.Rectangle<num> activatingElementRect =
-          domRenderer.glassPaneElement.getBoundingClientRect();
-      final double midX = activatingElementRect.left +
-          (activatingElementRect.right - activatingElementRect.left) / 2;
-      final double midY = activatingElementRect.top +
-          (activatingElementRect.bottom - activatingElementRect.top) / 2;
-      final double deltaX = activationPoint.x - midX;
-      final double deltaY = activationPoint.y - midY;
+          domRenderer.glassPaneElement!.getBoundingClientRect();
+      final double midX = (activatingElementRect.left +
+              (activatingElementRect.right - activatingElementRect.left) / 2)
+          .toDouble();
+      final double midY = (activatingElementRect.top +
+              (activatingElementRect.bottom - activatingElementRect.top) / 2)
+          .toDouble();
+      final double deltaX = activationPoint.x.toDouble() - midX;
+      final double deltaY = activationPoint.y.toDouble() - midY;
       final double deltaSquared = deltaX * deltaX + deltaY * deltaY;
       if (deltaSquared < 1.0) {
         safariEnableConditionPassed = true;
@@ -367,25 +382,25 @@ class MobileSemanticsEnabler extends SemanticsEnabler {
   }
 
   @override
-  html.Element prepareAccesibilityPlaceholder() {
-    _semanticsPlaceholder = html.Element.tag('flt-semantics-placeholder');
+  html.Element prepareAccessibilityPlaceholder() {
+    final html.Element placeholder = _semanticsPlaceholder = html.Element.tag('flt-semantics-placeholder');
 
     // Only listen to "click" because other kinds of events are reported via
     // PointerBinding.
-    _semanticsPlaceholder.addEventListener('click', (html.Event event) {
+    placeholder.addEventListener('click', (html.Event event) {
       tryEnableSemantics(event);
     }, true);
 
-    _semanticsPlaceholder
+    placeholder
       ..setAttribute('role', 'button')
       ..setAttribute('aria-label', placeholderMessage);
-    _semanticsPlaceholder.style
+    placeholder.style
       ..position = 'absolute'
       ..left = '0'
       ..top = '0'
       ..right = '0'
       ..bottom = '0';
 
-    return _semanticsPlaceholder;
+    return placeholder;
   }
 }

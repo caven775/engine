@@ -4,8 +4,12 @@
 
 #include "flutter/shell/gpu/gpu_surface_metal.h"
 
-#include <QuartzCore/CAMetalLayer.h>
+#import <Metal/Metal.h>
 
+#include "flutter/fml/make_copyable.h"
+#include "flutter/fml/platform/darwin/cf_utils.h"
+#include "flutter/fml/trace_event.h"
+#include "flutter/shell/gpu/gpu_surface_metal_delegate.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/ports/SkCFObject.h"
@@ -14,64 +18,10 @@ static_assert(!__has_feature(objc_arc), "ARC must be disabled.");
 
 namespace flutter {
 
-GPUSurfaceMetal::GPUSurfaceMetal(GPUSurfaceDelegate* delegate,
-                                 fml::scoped_nsobject<CAMetalLayer> layer)
-    : delegate_(delegate), layer_(std::move(layer)) {
-  if (!layer_) {
-    FML_LOG(ERROR) << "Could not create metal surface because of invalid layer.";
-    return;
-  }
-
-  layer.get().pixelFormat = MTLPixelFormatBGRA8Unorm;
-  // Flutter needs to read from the color attachment in cases where there are effects such as
-  // backdrop filters.
-  layer.get().framebufferOnly = NO;
-
-  auto metal_device = fml::scoped_nsprotocol<id<MTLDevice>>([layer_.get().device retain]);
-  auto metal_queue = fml::scoped_nsprotocol<id<MTLCommandQueue>>([metal_device newCommandQueue]);
-
-  if (!metal_device || !metal_queue) {
-    FML_LOG(ERROR) << "Could not create metal device or queue.";
-    return;
-  }
-
-  command_queue_ = metal_queue;
-
-  // The context creation routine accepts arguments using transfer semantics.
-  auto context = GrContext::MakeMetal(metal_device.release(), metal_queue.release());
-  if (!context) {
-    FML_LOG(ERROR) << "Could not create Skia metal context.";
-    return;
-  }
-
-  context_ = context;
-}
-
-GPUSurfaceMetal::GPUSurfaceMetal(GPUSurfaceDelegate* delegate,
-                                 sk_sp<GrContext> gr_context,
-                                 fml::scoped_nsobject<CAMetalLayer> layer)
-    : delegate_(delegate), layer_(std::move(layer)), context_(gr_context) {
-  if (!layer_) {
-    FML_LOG(ERROR) << "Could not create metal surface because of invalid layer.";
-    return;
-  }
-  if (!context_) {
-    FML_LOG(ERROR) << "Could not create metal surface because of invalid Skia metal context.";
-    return;
-  }
-
-  layer.get().pixelFormat = MTLPixelFormatBGRA8Unorm;
-
-  auto metal_device = fml::scoped_nsprotocol<id<MTLDevice>>([layer_.get().device retain]);
-  auto metal_queue = fml::scoped_nsprotocol<id<MTLCommandQueue>>([metal_device newCommandQueue]);
-
-  if (!metal_device || !metal_queue) {
-    FML_LOG(ERROR) << "Could not create metal device or queue.";
-    return;
-  }
-
-  command_queue_ = metal_queue;
-}
+GPUSurfaceMetal::GPUSurfaceMetal(GPUSurfaceMetalDelegate* delegate, sk_sp<GrDirectContext> context)
+    : delegate_(delegate),
+      render_target_type_(delegate->GetRenderTargetType()),
+      context_(std::move(context)) {}
 
 GPUSurfaceMetal::~GPUSurfaceMetal() {
   ReleaseUnusedDrawableIfNecessary();
@@ -79,77 +29,113 @@ GPUSurfaceMetal::~GPUSurfaceMetal() {
 
 // |Surface|
 bool GPUSurfaceMetal::IsValid() {
-  return layer_ && context_ && command_queue_;
+  return context_ != nullptr;
 }
 
 // |Surface|
-std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrame(const SkISize& size) {
+std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrame(const SkISize& frame_size) {
   if (!IsValid()) {
     FML_LOG(ERROR) << "Metal surface was invalid.";
     return nullptr;
   }
 
-  if (size.isEmpty()) {
+  if (frame_size.isEmpty()) {
     FML_LOG(ERROR) << "Metal surface was asked for an empty frame.";
     return nullptr;
   }
 
-  const auto bounds = layer_.get().bounds.size;
-  if (bounds.width <= 0.0 || bounds.height <= 0.0) {
-    FML_LOG(ERROR) << "Metal layer bounds were invalid.";
+  switch (render_target_type_) {
+    case MTLRenderTargetType::kCAMetalLayer:
+      return AcquireFrameFromCAMetalLayer(frame_size);
+    case MTLRenderTargetType::kMTLTexture:
+      return AcquireFrameFromMTLTexture(frame_size);
+    default:
+      FML_CHECK(false) << "Unknown MTLRenderTargetType type.";
+  }
+
+  return nullptr;
+}
+
+std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrameFromCAMetalLayer(
+    const SkISize& frame_info) {
+  auto layer = delegate_->GetCAMetalLayer(frame_info);
+  if (!layer) {
+    FML_LOG(ERROR) << "Invalid CAMetalLayer given by the embedder.";
     return nullptr;
   }
 
   ReleaseUnusedDrawableIfNecessary();
+  sk_sp<SkSurface> surface =
+      SkSurface::MakeFromCAMetalLayer(context_.get(),            // context
+                                      layer,                     // layer
+                                      kTopLeft_GrSurfaceOrigin,  // origin
+                                      1,                         // sample count
+                                      kBGRA_8888_SkColorType,    // color type
+                                      nullptr,                   // colorspace
+                                      nullptr,                   // surface properties
+                                      &next_drawable_            // drawable (transfer out)
+      );
 
-  auto surface = SkSurface::MakeFromCAMetalLayer(context_.get(),            // context
-                                                 layer_.get(),              // layer
-                                                 kTopLeft_GrSurfaceOrigin,  // origin
-                                                 1,                         // sample count
-                                                 kBGRA_8888_SkColorType,    // color type
-                                                 nullptr,                   // colorspace
-                                                 nullptr,                   // surface properties
-                                                 &next_drawable_  // drawable (transfer out)
-  );
+  if (!surface) {
+    FML_LOG(ERROR) << "Could not create the SkSurface from the CAMetalLayer.";
+    return nullptr;
+  }
+
+  auto submit_callback = [this](const SurfaceFrame& surface_frame, SkCanvas* canvas) -> bool {
+    TRACE_EVENT0("flutter", "GPUSurfaceMetal::Submit");
+    if (canvas == nullptr) {
+      FML_DLOG(ERROR) << "Canvas not available.";
+      return false;
+    }
+
+    canvas->flush();
+
+    GrMTLHandle drawable = next_drawable_;
+    if (!drawable) {
+      FML_DLOG(ERROR) << "Unable to obtain a metal drawable.";
+      return false;
+    }
+
+    return delegate_->PresentDrawable(drawable);
+  };
+
+  return std::make_unique<SurfaceFrame>(std::move(surface), true, submit_callback);
+}
+
+std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrameFromMTLTexture(
+    const SkISize& frame_info) {
+  GPUMTLTextureInfo texture = delegate_->GetMTLTexture(frame_info);
+  id<MTLTexture> mtl_texture = (id<MTLTexture>)(texture.texture);
+
+  if (!mtl_texture) {
+    FML_LOG(ERROR) << "Invalid MTLTexture given by the embedder.";
+    return nullptr;
+  }
+
+  GrMtlTextureInfo info;
+  info.fTexture.reset([mtl_texture retain]);
+  GrBackendTexture backend_texture(frame_info.width(), frame_info.height(), GrMipmapped::kNo, info);
+
+  sk_sp<SkSurface> surface =
+      SkSurface::MakeFromBackendTexture(context_.get(), backend_texture, kTopLeft_GrSurfaceOrigin,
+                                        1, kBGRA_8888_SkColorType, nullptr, nullptr);
 
   if (!surface) {
     FML_LOG(ERROR) << "Could not create the SkSurface from the metal texture.";
     return nullptr;
   }
 
-  auto submit_callback = [this](const SurfaceFrame& surface_frame, SkCanvas* canvas) -> bool {
-    canvas->flush();
-
-    if (next_drawable_ == nullptr) {
-      FML_DLOG(ERROR) << "Could not acquire next Metal drawable from the SkSurface.";
+  auto submit_callback = [texture_id = texture.texture_id, delegate = delegate_](
+                             const SurfaceFrame& surface_frame, SkCanvas* canvas) -> bool {
+    TRACE_EVENT0("flutter", "GPUSurfaceMetal::PresentTexture");
+    if (canvas == nullptr) {
+      FML_DLOG(ERROR) << "Canvas not available.";
       return false;
     }
 
-    const auto has_external_view_embedder = delegate_->GetExternalViewEmbedder() != nullptr;
+    canvas->flush();
 
-    auto command_buffer =
-        fml::scoped_nsprotocol<id<MTLCommandBuffer>>([[command_queue_.get() commandBuffer] retain]);
-
-    fml::scoped_nsprotocol<id<CAMetalDrawable>> drawable(
-        reinterpret_cast<id<CAMetalDrawable>>(next_drawable_));
-    next_drawable_ = nullptr;
-
-    // External views need to present with transaction. When presenting with
-    // transaction, we have to block, otherwise we risk presenting the drawable
-    // after the CATransaction has completed.
-    // See:
-    // https://developer.apple.com/documentation/quartzcore/cametallayer/1478157-presentswithtransaction
-    // TODO(dnfield): only do this if transactions are actually being used.
-    // https://github.com/flutter/flutter/issues/24133
-    if (!has_external_view_embedder) {
-      [command_buffer.get() presentDrawable:drawable.get()];
-      [command_buffer.get() commit];
-    } else {
-      [command_buffer.get() commit];
-      [command_buffer.get() waitUntilScheduled];
-      [drawable.get() present];
-    }
-    return true;
+    return delegate->PresentTexture(texture_id);
   };
 
   return std::make_unique<SurfaceFrame>(std::move(surface), true, submit_callback);
@@ -159,25 +145,18 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceMetal::AcquireFrame(const SkISize& size)
 SkMatrix GPUSurfaceMetal::GetRootTransformation() const {
   // This backend does not currently support root surface transformations. Just
   // return identity.
-  SkMatrix matrix;
-  matrix.reset();
-  return matrix;
+  return {};
 }
 
 // |Surface|
-GrContext* GPUSurfaceMetal::GetContext() {
+GrDirectContext* GPUSurfaceMetal::GetContext() {
   return context_.get();
 }
 
 // |Surface|
-flutter::ExternalViewEmbedder* GPUSurfaceMetal::GetExternalViewEmbedder() {
-  return delegate_->GetExternalViewEmbedder();
-}
-
-// |Surface|
-bool GPUSurfaceMetal::MakeRenderContextCurrent() {
+std::unique_ptr<GLContextResult> GPUSurfaceMetal::MakeRenderContextCurrent() {
   // This backend has no such concept.
-  return true;
+  return std::make_unique<GLContextDefaultResult>(true);
 }
 
 void GPUSurfaceMetal::ReleaseUnusedDrawableIfNecessary() {

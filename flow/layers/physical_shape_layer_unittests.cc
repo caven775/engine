@@ -23,11 +23,11 @@ TEST_F(PhysicalShapeLayerTest, PaintingEmptyLayerDies) {
 
   layer->Preroll(preroll_context(), SkMatrix());
   EXPECT_EQ(layer->paint_bounds(), SkRect::MakeEmpty());
-  EXPECT_FALSE(layer->needs_painting());
+  EXPECT_FALSE(layer->needs_painting(paint_context()));
   EXPECT_FALSE(layer->needs_system_composite());
 
   EXPECT_DEATH_IF_SUPPORTED(layer->Paint(paint_context()),
-                            "needs_painting\\(\\)");
+                            "needs_painting\\(context\\)");
 }
 
 TEST_F(PhysicalShapeLayerTest, PaintBeforePreollDies) {
@@ -41,7 +41,7 @@ TEST_F(PhysicalShapeLayerTest, PaintBeforePreollDies) {
   layer->Add(mock_layer);
 
   EXPECT_DEATH_IF_SUPPORTED(layer->Paint(paint_context()),
-                            "needs_painting\\(\\)");
+                            "needs_painting\\(context\\)");
 }
 #endif
 
@@ -54,7 +54,7 @@ TEST_F(PhysicalShapeLayerTest, NonEmptyLayer) {
                                            layer_path, Clip::none);
   layer->Preroll(preroll_context(), SkMatrix());
   EXPECT_EQ(layer->paint_bounds(), layer_path.getBounds());
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
   EXPECT_FALSE(layer->needs_system_composite());
 
   SkPaint layer_paint;
@@ -93,7 +93,7 @@ TEST_F(PhysicalShapeLayerTest, ChildrenLargerThanPath) {
   child_paint_bounds.join(child2->paint_bounds());
   EXPECT_EQ(layer->paint_bounds(), layer_path.getBounds());
   EXPECT_NE(layer->paint_bounds(), child_paint_bounds);
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
   EXPECT_FALSE(layer->needs_system_composite());
 
   SkPaint layer_paint;
@@ -126,22 +126,16 @@ TEST_F(PhysicalShapeLayerTest, ElevationSimple) {
   layer->Preroll(preroll_context(), SkMatrix());
   // The Fuchsia system compositor handles all elevated PhysicalShapeLayers and
   // their shadows , so we do not do any painting there.
-#if defined(OS_FUCHSIA)
-  EXPECT_EQ(layer->paint_bounds(), kEmptyRect);
-  EXPECT_FALSE(layer->needs_painting());
-  EXPECT_TRUE(layer->needs_system_composite());
-#else
   EXPECT_EQ(layer->paint_bounds(),
             PhysicalShapeLayer::ComputeShadowBounds(layer_path.getBounds(),
                                                     initial_elevation, 1.0f));
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
   EXPECT_FALSE(layer->needs_system_composite());
-#endif
-  EXPECT_EQ(layer->total_elevation(), initial_elevation);
+  EXPECT_EQ(layer->elevation(), initial_elevation);
 
   // The Fuchsia system compositor handles all elevated PhysicalShapeLayers and
   // their shadows , so we do not use the direct |Paint()| path there.
-#if !defined(OS_FUCHSIA)
+#if !defined(LEGACY_FUCHSIA_EMBEDDER)
   SkPaint layer_paint;
   layer_paint.setColor(SK_ColorGREEN);
   layer_paint.setAntiAlias(true);
@@ -168,7 +162,6 @@ TEST_F(PhysicalShapeLayerTest, ElevationComplex) {
   // |
   // layers[1] + 2.0f = 3.0f
   constexpr float initial_elevations[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-  constexpr float total_elevations[4] = {1.0f, 3.0f, 4.0f, 8.0f};
   SkPath layer_path;
   layer_path.addRect(0, 0, 80, 80).close();
 
@@ -187,24 +180,17 @@ TEST_F(PhysicalShapeLayerTest, ElevationComplex) {
     // On Fuchsia, the system compositor handles all elevated
     // PhysicalShapeLayers and their shadows , so we do not do any painting
     // there.
-#if defined(OS_FUCHSIA)
-    EXPECT_EQ(layers[i]->paint_bounds(), kEmptyRect);
-    EXPECT_FALSE(layers[i]->needs_painting());
-    EXPECT_TRUE(layers[i]->needs_system_composite());
-#else
     EXPECT_EQ(layers[i]->paint_bounds(),
               (PhysicalShapeLayer::ComputeShadowBounds(
                   layer_path.getBounds(), initial_elevations[i],
                   1.0f /* pixel_ratio */)));
-    EXPECT_TRUE(layers[i]->needs_painting());
+    EXPECT_TRUE(layers[i]->needs_painting(paint_context()));
     EXPECT_FALSE(layers[i]->needs_system_composite());
-#endif
-    EXPECT_EQ(layers[i]->total_elevation(), total_elevations[i]);
   }
 
   // The Fuchsia system compositor handles all elevated PhysicalShapeLayers and
   // their shadows , so we do not use the direct |Paint()| path there.
-#if !defined(OS_FUCHSIA)
+#if !defined(LEGACY_FUCHSIA_EMBEDDER)
   SkPaint layer_paint;
   layer_paint.setColor(SK_ColorBLACK);
   layer_paint.setAntiAlias(true);

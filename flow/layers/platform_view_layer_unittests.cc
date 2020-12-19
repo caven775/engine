@@ -26,8 +26,12 @@ TEST_F(PlatformViewLayerTest, NullViewEmbedderDoesntPrerollCompositeOrPaint) {
   EXPECT_EQ(layer->paint_bounds(),
             SkRect::MakeSize(layer_size)
                 .makeOffset(layer_offset.fX, layer_offset.fY));
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
+  EXPECT_TRUE(layer->needs_system_composite());
+#else
   EXPECT_FALSE(layer->needs_system_composite());
+#endif  // LEGACY_FUCHSIA_EMBEDDER
 
   layer->Paint(paint_context());
   EXPECT_EQ(paint_context().leaf_nodes_canvas, &mock_canvas());

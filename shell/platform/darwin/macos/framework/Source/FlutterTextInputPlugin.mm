@@ -113,7 +113,6 @@ static NSString* const kMultilineInputType = @"TextInputType.multiline";
     [self updateEditState];
   } else {
     handled = NO;
-    NSLog(@"Unhandled text input method '%@'", method);
   }
   result(handled ? nil : FlutterMethodNotImplemented);
 }
@@ -130,68 +129,20 @@ static NSString* const kMultilineInputType = @"TextInputType.multiline";
 }
 
 #pragma mark -
-#pragma mark NSResponder
+#pragma mark FlutterIntermediateKeyResponder
 
 /**
+ * Handles key down events received from the view controller, responding TRUE if
+ * the event was handled.
+ *
  * Note, the Apple docs suggest that clients should override essentially all the
  * mouse and keyboard event-handling methods of NSResponder. However, experimentation
  * indicates that only key events are processed by the native layer; Flutter processes
  * mouse events. Additionally, processing both keyUp and keyDown results in duplicate
- * processing of the same keys. So for now, limit processing to just keyDown.
+ * processing of the same keys. So for now, limit processing to just handleKeyDown.
  */
-- (void)keyDown:(NSEvent*)event {
-  [_textInputContext handleEvent:event];
-}
-
-#pragma mark -
-#pragma mark NSStandardKeyBindingMethods
-
-/**
- * Note, experimentation indicates that moveRight and moveLeft are called rather
- * than the supposedly more RTL-friendly moveForward and moveBackward.
- */
-- (void)moveLeft:(nullable id)sender {
-  NSRange selection = self.activeModel.selectedRange;
-  if (selection.length == 0) {
-    if (selection.location > 0) {
-      // Move to previous location
-      self.activeModel.selectedRange = NSMakeRange(selection.location - 1, 0);
-      [self updateEditState];
-    }
-  } else {
-    // Collapse current selection
-    self.activeModel.selectedRange = NSMakeRange(selection.location, 0);
-    [self updateEditState];
-  }
-}
-
-- (void)moveRight:(nullable id)sender {
-  NSRange selection = self.activeModel.selectedRange;
-  if (selection.length == 0) {
-    if (selection.location < self.activeModel.text.length) {
-      // Move to next location
-      self.activeModel.selectedRange = NSMakeRange(selection.location + 1, 0);
-      [self updateEditState];
-    }
-  } else {
-    // Collapse current selection
-    self.activeModel.selectedRange = NSMakeRange(selection.location + selection.length, 0);
-    [self updateEditState];
-  }
-}
-
-- (void)deleteBackward:(id)sender {
-  NSRange selection = self.activeModel.selectedRange;
-  if (selection.location == 0)
-    return;
-  NSRange range = selection;
-  if (selection.length == 0) {
-    NSUInteger location = (selection.location == NSNotFound) ? self.activeModel.text.length - 1
-                                                             : selection.location - 1;
-    range = NSMakeRange(location, 1);
-  }
-  self.activeModel.selectedRange = NSMakeRange(range.location, 0);
-  [self insertText:@"" replacementRange:range];  // Updates edit state
+- (BOOL)handleKeyDown:(NSEvent*)event {
+  return [_textInputContext handleEvent:event];
 }
 
 #pragma mark -

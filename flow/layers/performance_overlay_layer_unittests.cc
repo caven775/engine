@@ -4,6 +4,9 @@
 
 #include "flutter/flow/layers/performance_overlay_layer.h"
 
+#include <cstdint>
+#include <sstream>
+
 #include "flutter/flow/flow_test_utils.h"
 #include "flutter/flow/raster_cache.h"
 #include "flutter/flow/testing/layer_test.h"
@@ -17,9 +20,6 @@
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/core/SkTextBlob.h"
 #include "third_party/skia/include/utils/SkBase64.h"
-
-#include <cstdint>
-#include <sstream>
 
 namespace flutter {
 namespace testing {
@@ -88,6 +88,8 @@ static void TestPerformanceOverlayLayerGold(int refresh_rate) {
       << "Please either set --golden-dir, or make sure that the unit test is "
       << "run from the right directory (e.g., flutter/engine/src).";
 
+  // TODO(https://github.com/flutter/flutter/issues/53784): enable this on all
+  // platforms.
 #if !defined(OS_LINUX)
   GTEST_SKIP() << "Skipping golden tests on non-Linux OSes";
 #endif  // OS_LINUX
@@ -124,7 +126,7 @@ TEST_F(PerformanceOverlayLayerTest, PaintingEmptyLayerDies) {
 
   layer->Preroll(preroll_context(), SkMatrix());
   EXPECT_EQ(layer->paint_bounds(), SkRect::MakeEmpty());
-  EXPECT_FALSE(layer->needs_painting());
+  EXPECT_FALSE(layer->needs_painting(paint_context()));
 
   // Crashes reading a nullptr.
   EXPECT_DEATH_IF_SUPPORTED(layer->Paint(paint_context()), "");
@@ -141,7 +143,7 @@ TEST_F(PerformanceOverlayLayerTest, InvalidOptions) {
 
   layer->Preroll(preroll_context(), SkMatrix());
   EXPECT_EQ(layer->paint_bounds(), layer_bounds);
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
 
   // Nothing is drawn if options are invalid (0).
   layer->Paint(paint_context());
@@ -159,11 +161,11 @@ TEST_F(PerformanceOverlayLayerTest, SimpleRasterizerStatistics) {
 
   layer->Preroll(preroll_context(), SkMatrix());
   EXPECT_EQ(layer->paint_bounds(), layer_bounds);
-  EXPECT_TRUE(layer->needs_painting());
+  EXPECT_TRUE(layer->needs_painting(paint_context()));
 
   layer->Paint(paint_context());
   auto overlay_text = PerformanceOverlayLayer::MakeStatisticsText(
-      paint_context().raster_time, "GPU", "");
+      paint_context().raster_time, "Raster", "");
   auto overlay_text_data = overlay_text->serialize(SkSerialProcs{});
   SkPaint text_paint;
   text_paint.setColor(SK_ColorGRAY);

@@ -8,10 +8,10 @@
 #include <memory>
 #include <vector>
 
+#include "flutter/common/graphics/texture.h"
 #include "flutter/flow/embedded_views.h"
 #include "flutter/flow/instrumentation.h"
 #include "flutter/flow/raster_cache.h"
-#include "flutter/flow/texture.h"
 #include "flutter/fml/build_config.h"
 #include "flutter/fml/compiler_specific.h"
 #include "flutter/fml/logging.h"
@@ -27,13 +27,11 @@
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/utils/SkNWayCanvas.h"
 
-#if defined(OS_FUCHSIA)
-
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
 #include "flutter/flow/scene_update_context.h"  //nogncheck
 #include "lib/ui/scenic/cpp/resources.h"        //nogncheck
 #include "lib/ui/scenic/cpp/session.h"          //nogncheck
-
-#endif  // defined(OS_FUCHSIA)
+#endif
 
 namespace flutter {
 
@@ -44,7 +42,7 @@ enum Clip { none, hardEdge, antiAlias, antiAliasWithSaveLayer };
 
 struct PrerollContext {
   RasterCache* raster_cache;
-  GrContext* gr_context;
+  GrDirectContext* gr_context;
   ExternalViewEmbedder* view_embedder;
   MutatorsStack& mutators_stack;
   SkColorSpace* dst_color_space;
@@ -56,16 +54,16 @@ struct PrerollContext {
   const Stopwatch& ui_time;
   TextureRegistry& texture_registry;
   const bool checkerboard_offscreen_layers;
-
-  // These allow us to make use of the scene metrics during Preroll.
-  float frame_physical_depth;
-  float frame_device_pixel_ratio;
+  const float frame_device_pixel_ratio;
 
   // These allow us to track properties like elevation, opacity, and the
   // prescence of a platform view during Preroll.
-  float total_elevation = 0.0f;
   bool has_platform_view = false;
-  bool is_opaque = true;
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
+  // True if, during the traversal so far, we have seen a child_scene_layer.
+  // Informs whether a layer needs to be system composited.
+  bool child_scene_layer_exists_below = false;
+#endif
 };
 
 // Represents a single composited layer. Created on the UI thread but then
@@ -84,7 +82,7 @@ class Layer {
   // destruction.
   class AutoPrerollSaveLayerState {
    public:
-    FML_WARN_UNUSED_RESULT static AutoPrerollSaveLayerState Create(
+    [[nodiscard]] static AutoPrerollSaveLayerState Create(
         PrerollContext* preroll_context,
         bool save_layer_is_active = true,
         bool layer_itself_performs_readback = false);
@@ -116,29 +114,25 @@ class Layer {
     // layers.
     SkCanvas* internal_nodes_canvas;
     SkCanvas* leaf_nodes_canvas;
-    GrContext* gr_context;
+    GrDirectContext* gr_context;
     ExternalViewEmbedder* view_embedder;
     const Stopwatch& raster_time;
     const Stopwatch& ui_time;
     TextureRegistry& texture_registry;
     const RasterCache* raster_cache;
     const bool checkerboard_offscreen_layers;
-
-    // These allow us to make use of the scene metrics during Paint.
-    float frame_physical_depth;
-    float frame_device_pixel_ratio;
+    const float frame_device_pixel_ratio;
   };
 
   // Calls SkCanvas::saveLayer and restores the layer upon destruction. Also
   // draws a checkerboard over the layer if that is enabled in the PaintContext.
   class AutoSaveLayer {
    public:
-    FML_WARN_UNUSED_RESULT static AutoSaveLayer Create(
-        const PaintContext& paint_context,
-        const SkRect& bounds,
-        const SkPaint* paint);
+    [[nodiscard]] static AutoSaveLayer Create(const PaintContext& paint_context,
+                                              const SkRect& bounds,
+                                              const SkPaint* paint);
 
-    FML_WARN_UNUSED_RESULT static AutoSaveLayer Create(
+    [[nodiscard]] static AutoSaveLayer Create(
         const PaintContext& paint_context,
         const SkCanvas::SaveLayerRec& layer_rec);
 
@@ -158,9 +152,10 @@ class Layer {
 
   virtual void Paint(PaintContext& context) const = 0;
 
-#if defined(OS_FUCHSIA)
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
   // Updates the system composited scene.
-  virtual void UpdateScene(SceneUpdateContext& context);
+  virtual void UpdateScene(std::shared_ptr<SceneUpdateContext> context);
+  virtual void CheckForChildLayerBelow(PrerollContext* context);
 #endif
 
   bool needs_system_composite() const { return needs_system_composite_; }
@@ -168,17 +163,47 @@ class Layer {
     needs_system_composite_ = value;
   }
 
+  // Returns the paint bounds in the layer's local coordinate system
+  // as determined during Preroll().  The bounds should include any
+  // transform, clip or distortions performed by the layer itself,
+  // but not any similar modifications inherited from its ancestors.
   const SkRect& paint_bounds() const { return paint_bounds_; }
 
   // This must be set by the time Preroll() returns otherwise the layer will
   // be assumed to have empty paint bounds (paints no content).
+  // The paint bounds should be independent of the context outside of this
+  // layer as the layer may be painted under different conditions than
+  // the Preroll context. The most common example of this condition is
+  // that we might Preroll the layer with a cull_rect established by a
+  // clip layer above it but then we might be asked to paint anyway if
+  // another layer above us needs to cache its children. During the
+  // paint operation that arises due to the caching, the clip will
+  // be the bounds of the layer needing caching, not the cull_rect
+  // that we saw in the overall Preroll operation.
   void set_paint_bounds(const SkRect& paint_bounds) {
     paint_bounds_ = paint_bounds;
   }
 
-  bool needs_painting() const { return !paint_bounds_.isEmpty(); }
+  // Determines if the layer has any content.
+  bool is_empty() const { return paint_bounds_.isEmpty(); }
+
+  // Determines if the Paint() method is necessary based on the properties
+  // of the indicated PaintContext object.
+  bool needs_painting(PaintContext& context) const {
+    // Workaround for Skia bug (quickReject does not reject empty bounds).
+    // https://bugs.chromium.org/p/skia/issues/detail?id=10951
+    if (paint_bounds_.isEmpty()) {
+      return false;
+    }
+    return !context.leaf_nodes_canvas->quickReject(paint_bounds_);
+  }
 
   uint64_t unique_id() const { return unique_id_; }
+
+ protected:
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
+  bool child_layer_exists_below_ = false;
+#endif
 
  private:
   SkRect paint_bounds_;

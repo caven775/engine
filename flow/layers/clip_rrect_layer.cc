@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "flutter/flow/layers/clip_rrect_layer.h"
+#include "flutter/flow/paint_utils.h"
 
 namespace flutter {
 
@@ -12,27 +13,29 @@ ClipRRectLayer::ClipRRectLayer(const SkRRect& clip_rrect, Clip clip_behavior)
 }
 
 void ClipRRectLayer::Preroll(PrerollContext* context, const SkMatrix& matrix) {
+  TRACE_EVENT0("flutter", "ClipRRectLayer::Preroll");
+
   SkRect previous_cull_rect = context->cull_rect;
   SkRect clip_rrect_bounds = clip_rrect_.getBounds();
-  children_inside_clip_ = context->cull_rect.intersect(clip_rrect_bounds);
-  if (children_inside_clip_) {
-    Layer::AutoPrerollSaveLayerState save =
-        Layer::AutoPrerollSaveLayerState::Create(context, UsesSaveLayer());
-    context->mutators_stack.PushClipRRect(clip_rrect_);
-    SkRect child_paint_bounds = SkRect::MakeEmpty();
-    PrerollChildren(context, matrix, &child_paint_bounds);
+  context->cull_rect.intersect(clip_rrect_bounds);
+  Layer::AutoPrerollSaveLayerState save =
+      Layer::AutoPrerollSaveLayerState::Create(context, UsesSaveLayer());
+  context->mutators_stack.PushClipRRect(clip_rrect_);
 
-    if (child_paint_bounds.intersect(clip_rrect_bounds)) {
-      set_paint_bounds(child_paint_bounds);
-    }
-    context->mutators_stack.Pop();
+  SkRect child_paint_bounds = SkRect::MakeEmpty();
+  PrerollChildren(context, matrix, &child_paint_bounds);
+  if (child_paint_bounds.intersect(clip_rrect_bounds)) {
+    set_paint_bounds(child_paint_bounds);
   }
+
+  context->mutators_stack.Pop();
   context->cull_rect = previous_cull_rect;
 }
 
-#if defined(OS_FUCHSIA)
+#if defined(LEGACY_FUCHSIA_EMBEDDER)
 
-void ClipRRectLayer::UpdateScene(SceneUpdateContext& context) {
+void ClipRRectLayer::UpdateScene(std::shared_ptr<SceneUpdateContext> context) {
+  TRACE_EVENT0("flutter", "ClipRRectLayer::UpdateScene");
   FML_DCHECK(needs_system_composite());
 
   // TODO(liyuqian): respect clip_behavior_
@@ -40,14 +43,11 @@ void ClipRRectLayer::UpdateScene(SceneUpdateContext& context) {
   UpdateSceneChildren(context);
 }
 
-#endif  // defined(OS_FUCHSIA)
+#endif
 
 void ClipRRectLayer::Paint(PaintContext& context) const {
   TRACE_EVENT0("flutter", "ClipRRectLayer::Paint");
-  FML_DCHECK(needs_painting());
-
-  if (!children_inside_clip_)
-    return;
+  FML_DCHECK(needs_painting(context));
 
   SkAutoCanvasRestore save(context.internal_nodes_canvas, true);
   context.internal_nodes_canvas->clipRRect(clip_rrect_,
@@ -59,6 +59,9 @@ void ClipRRectLayer::Paint(PaintContext& context) const {
   PaintChildren(context);
   if (UsesSaveLayer()) {
     context.internal_nodes_canvas->restore();
+    if (context.checkerboard_offscreen_layers) {
+      DrawCheckerboard(context.internal_nodes_canvas, paint_bounds());
+    }
   }
 }
 

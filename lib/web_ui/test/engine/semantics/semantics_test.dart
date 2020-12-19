@@ -2,12 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.6
+@TestOn('chrome || safari || firefox')
+
 import 'dart:async';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
 import 'package:mockito/mockito.dart';
 import 'package:quiver/testing/async.dart';
+import 'package:test/bootstrap/browser.dart';
 import 'package:test/test.dart';
 
 import 'package:ui/src/engine.dart';
@@ -20,6 +24,10 @@ DateTime _testTime = DateTime(2018, 12, 17);
 EngineSemanticsOwner semantics() => EngineSemanticsOwner.instance;
 
 void main() {
+  internalBootstrapBrowserTest(() => testMain);
+}
+
+void testMain() {
   setUp(() {
     EngineSemanticsOwner.debugResetSemantics();
   });
@@ -96,21 +104,23 @@ void _testEngineSemanticsOwner() {
 
   void renderLabel(String label) {
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 20, 20),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
     );
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 1,
       actions: 0,
       flags: 0,
       label: label,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 20, 20),
     );
     semantics().updateSemantics(builder.build());
@@ -126,6 +136,8 @@ void _testEngineSemanticsOwner() {
     expect(tree.length, 2);
     expect(tree[0].id, 0);
     expect(tree[0].element.tagName.toLowerCase(), 'flt-semantics');
+    expect(tree[1].id, 1);
+    expect(tree[1].label, 'Hello');
 
     expectSemanticsTree('''
 <sem style="filter: opacity(0%); color: rgba(0, 0, 0, 0)">
@@ -159,7 +171,9 @@ void _testEngineSemanticsOwner() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('clears semantics tree when disabled', () {
     expect(semantics().debugSemanticsTree, isEmpty);
@@ -222,12 +236,13 @@ void _testHeader() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0 | ui.SemanticsFlag.isHeader.index,
       label: 'Header of the page',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -239,7 +254,9 @@ void _testHeader() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testLongestIncreasingSubsequence() {
@@ -296,11 +313,12 @@ void _testContainer() {
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
     const ui.Rect zeroOffsetRect = ui.Rect.fromLTRB(0, 0, 20, 20);
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: zeroOffsetRect,
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -325,7 +343,9 @@ void _testContainer() {
     expect(container.style.transformOrigin, '');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('container node compensates for rect offset', () async {
     semantics()
@@ -333,11 +353,12 @@ void _testContainer() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(10, 10, 20, 20),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -356,13 +377,21 @@ void _testContainer() {
     final html.Element container =
         html.document.querySelector('flt-semantics-container');
 
-    expect(parentElement.style.transform, 'translate(10px, 10px)');
-    expect(parentElement.style.transformOrigin, '0px 0px 0px');
-    expect(container.style.transform, 'translate(-10px, -10px)');
-    expect(container.style.transformOrigin, '0px 0px 0px');
-
+    if (isDesktop) {
+      expect(parentElement.style.transform, 'matrix(1, 0, 0, 1, 10, 10)');
+      expect(parentElement.style.transformOrigin, '0px 0px 0px');
+      expect(container.style.transform, 'translate(-10px, -10px)');
+      expect(container.style.transformOrigin, '0px 0px 0px');
+    } else {
+      expect(parentElement.style.top, '20px');
+      expect(parentElement.style.left, '20px');
+      expect(container.style.top, '-10px');
+      expect(container.style.left, '-10px');
+    }
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testVerticalScrolling() {
@@ -372,11 +401,12 @@ void _testVerticalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.scrollUp.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 50, 100),
     );
 
@@ -386,7 +416,9 @@ void _testVerticalScrolling() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('scrollable node with children has a container node', () async {
     semantics()
@@ -394,11 +426,12 @@ void _testVerticalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.scrollUp.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 50, 100),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -420,7 +453,9 @@ void _testVerticalScrolling() {
     expect(scrollable.scrollTop, 0);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('scrollable node dispatches scroll events', () async {
     final StreamController<int> idLogController = StreamController<int>();
@@ -448,24 +483,26 @@ void _testVerticalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 |
           ui.SemanticsAction.scrollUp.index |
           ui.SemanticsAction.scrollDown.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 50, 100),
       childrenInHitTestOrder: Int32List.fromList(<int>[1, 2, 3]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1, 2, 3]),
     );
 
-    for (int id = 1; id <= 3; id++) {
-      builder.updateNode(
+    for (int id = 1; id <= 5; id++) {
+      updateNode(
+        builder,
         id: id,
         actions: 0,
         flags: 0,
-        transform: Matrix4.translationValues(0, 50.0 * id, 0).storage,
+        transform: Matrix4.translationValues(0, 50.0 * id, 0).toFloat64(),
         rect: const ui.Rect.fromLTRB(0, 0, 50, 50),
       );
     }
@@ -484,25 +521,35 @@ void _testVerticalScrolling() {
     expect(scrollable, isNotNull);
 
     // When there's more content than the available size the neutral scrollTop
-    // is greater than 0 with a maximum of 10.
-    expect(scrollable.scrollTop, 10);
+    // is greater than 0 with a maximum of 10 or 9.
+    int browserMaxScrollDiff = 0;
+    // The max scroll value varies between `9` and `10` for Safari desktop
+    // browsers.
+    if (browserEngine == BrowserEngine.webkit &&
+        operatingSystem == OperatingSystem.macOs) {
+      browserMaxScrollDiff = 1;
+    }
+
+    expect(scrollable.scrollTop >= (10 - browserMaxScrollDiff), isTrue);
 
     scrollable.scrollTop = 20;
     expect(scrollable.scrollTop, 20);
     expect(await idLog.first, 0);
     expect(await actionLog.first, ui.SemanticsAction.scrollUp);
     // Engine semantics returns scroll top back to neutral.
-    expect(scrollable.scrollTop, 10);
+    expect(scrollable.scrollTop >= (10 - browserMaxScrollDiff), isTrue);
 
     scrollable.scrollTop = 5;
-    expect(scrollable.scrollTop, 5);
+    expect(scrollable.scrollTop >= (5 - browserMaxScrollDiff), isTrue);
     expect(await idLog.first, 0);
     expect(await actionLog.first, ui.SemanticsAction.scrollDown);
     // Engine semantics returns scroll top back to neutral.
-    expect(scrollable.scrollTop, 10);
+    expect(scrollable.scrollTop >= (10 - browserMaxScrollDiff), isTrue);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testHorizontalScrolling() {
@@ -512,11 +559,12 @@ void _testHorizontalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.scrollLeft.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -526,7 +574,9 @@ void _testHorizontalScrolling() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('scrollable node with children has a container node', () async {
     semantics()
@@ -534,11 +584,12 @@ void _testHorizontalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.scrollLeft.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -560,7 +611,9 @@ void _testHorizontalScrolling() {
     expect(scrollable.scrollLeft, 0);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('scrollable node dispatches scroll events', () async {
     final SemanticsActionLogger logger = SemanticsActionLogger();
@@ -569,24 +622,26 @@ void _testHorizontalScrolling() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 |
           ui.SemanticsAction.scrollLeft.index |
           ui.SemanticsAction.scrollRight.index,
       flags: 0,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
       childrenInHitTestOrder: Int32List.fromList(<int>[1, 2, 3]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1, 2, 3]),
     );
 
     for (int id = 1; id <= 3; id++) {
-      builder.updateNode(
+      updateNode(
+        builder,
         id: id,
         actions: 0,
         flags: 0,
-        transform: Matrix4.translationValues(50.0 * id, 0, 0).storage,
+        transform: Matrix4.translationValues(50.0 * id, 0, 0).toFloat64(),
         rect: const ui.Rect.fromLTRB(0, 0, 50, 50),
       );
     }
@@ -606,24 +661,33 @@ void _testHorizontalScrolling() {
 
     // When there's more content than the available size the neutral scrollTop
     // is greater than 0 with a maximum of 10.
-    expect(scrollable.scrollLeft, 10);
+    int browserMaxScrollDiff = 0;
+    // The max scroll value varies between `9` and `10` for Safari desktop
+    // browsers.
+    if (browserEngine == BrowserEngine.webkit &&
+        operatingSystem == OperatingSystem.macOs) {
+      browserMaxScrollDiff = 1;
+    }
+    expect(scrollable.scrollLeft >= (10 - browserMaxScrollDiff), isTrue);
 
     scrollable.scrollLeft = 20;
     expect(scrollable.scrollLeft, 20);
     expect(await logger.idLog.first, 0);
     expect(await logger.actionLog.first, ui.SemanticsAction.scrollLeft);
     // Engine semantics returns scroll position back to neutral.
-    expect(scrollable.scrollLeft, 10);
+    expect(scrollable.scrollLeft >= (10 - browserMaxScrollDiff), isTrue);
 
     scrollable.scrollLeft = 5;
-    expect(scrollable.scrollLeft, 5);
+    expect(scrollable.scrollLeft >= (5 - browserMaxScrollDiff), isTrue);
     expect(await logger.idLog.first, 0);
     expect(await logger.actionLog.first, ui.SemanticsAction.scrollRight);
     // Engine semantics returns scroll top back to neutral.
-    expect(scrollable.scrollLeft, 10);
+    expect(scrollable.scrollLeft >= (10 - browserMaxScrollDiff), isTrue);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testIncrementables() {
@@ -633,12 +697,13 @@ void _testIncrementables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.increase.index,
       flags: 0,
       value: 'd',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -649,7 +714,9 @@ void _testIncrementables() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('increments', () async {
     final SemanticsActionLogger logger = SemanticsActionLogger();
@@ -658,13 +725,14 @@ void _testIncrementables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.increase.index,
       flags: 0,
       value: 'd',
       increasedValue: 'e',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -683,7 +751,9 @@ void _testIncrementables() {
     expect(await logger.actionLog.first, ui.SemanticsAction.increase);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('decrements', () async {
     final SemanticsActionLogger logger = SemanticsActionLogger();
@@ -692,13 +762,14 @@ void _testIncrementables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.decrease.index,
       flags: 0,
       value: 'd',
       decreasedValue: 'c',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -717,7 +788,9 @@ void _testIncrementables() {
     expect(await logger.actionLog.first, ui.SemanticsAction.decrease);
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a node that can both increment and decrement', () async {
     semantics()
@@ -725,7 +798,8 @@ void _testIncrementables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 |
           ui.SemanticsAction.decrease.index |
@@ -734,7 +808,7 @@ void _testIncrementables() {
       value: 'd',
       increasedValue: 'e',
       decreasedValue: 'c',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -745,7 +819,9 @@ void _testIncrementables() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testTextField() {
@@ -755,12 +831,13 @@ void _testTextField() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 | ui.SemanticsFlag.isTextField.index,
       value: 'hello',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -771,7 +848,9 @@ void _testTextField() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   // TODO(yjbanov): this test will need to be adjusted for Safari when we add
   //                Safari testing.
@@ -782,12 +861,13 @@ void _testTextField() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 | ui.SemanticsFlag.isTextField.index,
       value: 'hello',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -806,8 +886,10 @@ void _testTextField() {
     expect(await logger.actionLog.first, ui.SemanticsAction.tap);
 
     semantics().semanticsEnabled = false;
-  }, // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
-      skip: (browserEngine == BrowserEngine.firefox));
+  },  // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50590
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: (browserEngine != BrowserEngine.blink));
 }
 
 void _testCheckables() {
@@ -817,14 +899,16 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.hasToggledState.index |
           ui.SemanticsFlag.isToggled.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -834,7 +918,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a switched on disabled switch element', () async {
     semantics()
@@ -842,13 +928,15 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasToggledState.index |
-          ui.SemanticsFlag.isToggled.index,
-      transform: Matrix4.identity().storage,
+          ui.SemanticsFlag.isToggled.index |
+          ui.SemanticsFlag.hasEnabledState.index,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -858,7 +946,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a switched off switch element', () async {
     semantics()
@@ -866,13 +956,15 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasToggledState.index |
-          ui.SemanticsFlag.isEnabled.index,
-      transform: Matrix4.identity().storage,
+          ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -882,21 +974,26 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
+
   test('renders a checked checkbox', () async {
     semantics()
       ..debugOverrideTimestampFunction(() => _testTime)
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.hasCheckedState.index |
           ui.SemanticsFlag.isChecked.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -906,7 +1003,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a checked disabled checkbox', () async {
     semantics()
@@ -914,13 +1013,15 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasCheckedState.index |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.isChecked.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -930,7 +1031,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders an unchecked checkbox', () async {
     semantics()
@@ -938,13 +1041,15 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasCheckedState.index |
-          ui.SemanticsFlag.isEnabled.index,
-      transform: Matrix4.identity().storage,
+          ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -954,7 +1059,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a checked radio button', () async {
     semantics()
@@ -962,15 +1069,17 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.hasCheckedState.index |
           ui.SemanticsFlag.isInMutuallyExclusiveGroup.index |
           ui.SemanticsFlag.isChecked.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -980,7 +1089,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a checked disabled radio button', () async {
     semantics()
@@ -988,14 +1099,16 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.hasCheckedState.index |
           ui.SemanticsFlag.isInMutuallyExclusiveGroup.index |
           ui.SemanticsFlag.isChecked.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1005,7 +1118,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders an unchecked checkbox', () async {
     semantics()
@@ -1013,14 +1128,16 @@ void _testCheckables() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.isEnabled.index |
+          ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.hasCheckedState.index |
           ui.SemanticsFlag.isInMutuallyExclusiveGroup.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1030,7 +1147,9 @@ void _testCheckables() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testTappable() {
@@ -1040,14 +1159,15 @@ void _testTappable() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.isEnabled.index |
           ui.SemanticsFlag.isButton.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1057,7 +1177,9 @@ void _testTappable() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders a disabled tappable widget', () async {
     semantics()
@@ -1065,13 +1187,14 @@ void _testTappable() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0 | ui.SemanticsAction.tap.index,
       flags: 0 |
           ui.SemanticsFlag.hasEnabledState.index |
           ui.SemanticsFlag.isButton.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1081,7 +1204,9 @@ void _testTappable() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testImage() {
@@ -1091,12 +1216,13 @@ void _testImage() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0 | ui.SemanticsFlag.isImage.index,
       label: 'Test Image Label',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1106,7 +1232,9 @@ void _testImage() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders an image with a child node and with a label', () async {
     semantics()
@@ -1114,12 +1242,13 @@ void _testImage() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0 | ui.SemanticsFlag.isImage.index,
       label: 'Test Image Label',
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -1136,7 +1265,9 @@ void _testImage() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders an image with no child nodes without a label', () async {
     semantics()
@@ -1144,11 +1275,12 @@ void _testImage() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0 | ui.SemanticsFlag.isImage.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
 
@@ -1157,7 +1289,9 @@ void _testImage() {
         '''<sem role="img" style="filter: opacity(0%); color: rgba(0, 0, 0, 0)"></sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('renders an image with a child node and without a label', () async {
     semantics()
@@ -1165,11 +1299,12 @@ void _testImage() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       flags: 0 | ui.SemanticsFlag.isImage.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
       childrenInHitTestOrder: Int32List.fromList(<int>[1]),
       childrenInTraversalOrder: Int32List.fromList(<int>[1]),
@@ -1186,7 +1321,9 @@ void _testImage() {
 </sem>''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void _testLiveRegion() {
@@ -1196,12 +1333,13 @@ void _testLiveRegion() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
       actions: 0,
       label: 'This is a snackbar',
       flags: 0 | ui.SemanticsFlag.isLiveRegion.index,
-      transform: Matrix4.identity().storage,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
     semantics().updateSemantics(builder.build());
@@ -1211,7 +1349,9 @@ void _testLiveRegion() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 
   test('does not render a live region if there is no label', () async {
     semantics()
@@ -1219,11 +1359,12 @@ void _testLiveRegion() {
       ..semanticsEnabled = true;
 
     final ui.SemanticsUpdateBuilder builder = ui.SemanticsUpdateBuilder();
-    builder.updateNode(
+    updateNode(
+      builder,
       id: 0,
-      actions: 0,
       flags: 0 | ui.SemanticsFlag.isLiveRegion.index,
-      transform: Matrix4.identity().storage,
+      actions: 0,
+      transform: Matrix4.identity().toFloat64(),
       rect: const ui.Rect.fromLTRB(0, 0, 100, 50),
     );
     semantics().updateSemantics(builder.build());
@@ -1233,7 +1374,9 @@ void _testLiveRegion() {
 ''');
 
     semantics().semanticsEnabled = false;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50754
+      skip: browserEngine == BrowserEngine.edge);
 }
 
 void expectSemanticsTree(String semanticsHtml) {
@@ -1279,4 +1422,69 @@ class SemanticsActionLogger {
       });
     };
   }
+}
+
+/// A facade in front of [ui.SemanticsUpdateBuilder.updateNode] that
+/// supplies default values for semantics attributes.
+void updateNode(
+  ui.SemanticsUpdateBuilder builder, {
+  int id = 0,
+  int flags = 0,
+  int actions = 0,
+  int maxValueLength = 0,
+  int currentValueLength = 0,
+  int textSelectionBase = 0,
+  int textSelectionExtent = 0,
+  int platformViewId = 0,
+  int scrollChildren = 0,
+  int scrollIndex = 0,
+  double scrollPosition = 0.0,
+  double scrollExtentMax = 0.0,
+  double scrollExtentMin = 0.0,
+  double elevation = 0.0,
+  double thickness = 0.0,
+  ui.Rect rect = ui.Rect.zero,
+  String label = '',
+  String hint = '',
+  String value = '',
+  String increasedValue = '',
+  String decreasedValue = '',
+  ui.TextDirection textDirection = ui.TextDirection.ltr,
+  Float64List transform,
+  Int32List childrenInTraversalOrder,
+  Int32List childrenInHitTestOrder,
+  Int32List additionalActions,
+}) {
+  transform ??= Float64List.fromList(Matrix4.identity().storage);
+  childrenInTraversalOrder ??= Int32List(0);
+  childrenInHitTestOrder ??= Int32List(0);
+  additionalActions ??= Int32List(0);
+  builder.updateNode(
+    id: id,
+    flags: flags,
+    actions: actions,
+    maxValueLength: maxValueLength,
+    currentValueLength: currentValueLength,
+    textSelectionBase: textSelectionBase,
+    textSelectionExtent: textSelectionExtent,
+    platformViewId: platformViewId,
+    scrollChildren: scrollChildren,
+    scrollIndex: scrollIndex,
+    scrollPosition: scrollPosition,
+    scrollExtentMax: scrollExtentMax,
+    scrollExtentMin: scrollExtentMin,
+    elevation: elevation,
+    thickness: thickness,
+    rect: rect,
+    label: label,
+    hint: hint,
+    value: value,
+    increasedValue: increasedValue,
+    decreasedValue: decreasedValue,
+    textDirection: textDirection,
+    transform: transform,
+    childrenInTraversalOrder: childrenInTraversalOrder,
+    childrenInHitTestOrder: childrenInHitTestOrder,
+    additionalActions: additionalActions,
+  );
 }

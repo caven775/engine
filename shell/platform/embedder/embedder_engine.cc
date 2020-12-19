@@ -27,16 +27,24 @@ EmbedderEngine::EmbedderEngine(
     flutter::Settings settings,
     RunConfiguration run_configuration,
     Shell::CreateCallback<PlatformView> on_create_platform_view,
-    Shell::CreateCallback<Rasterizer> on_create_rasterizer,
-    EmbedderExternalTextureGL::ExternalTextureCallback
-        external_texture_callback)
+    Shell::CreateCallback<Rasterizer> on_create_rasterizer
+#ifdef SHELL_ENABLE_GL
+    ,
+    EmbedderExternalTextureGL::ExternalTextureCallback external_texture_callback
+#endif
+    )
     : thread_host_(std::move(thread_host)),
       task_runners_(task_runners),
       run_configuration_(std::move(run_configuration)),
       shell_args_(std::make_unique<ShellArgs>(std::move(settings),
                                               on_create_platform_view,
-                                              on_create_rasterizer)),
-      external_texture_callback_(external_texture_callback) {}
+                                              on_create_rasterizer))
+#ifdef SHELL_ENABLE_GL
+      ,
+      external_texture_callback_(external_texture_callback)
+#endif
+{
+}
 
 EmbedderEngine::~EmbedderEngine() = default;
 
@@ -144,28 +152,37 @@ bool EmbedderEngine::SendPlatformMessage(
 }
 
 bool EmbedderEngine::RegisterTexture(int64_t texture) {
+#ifdef SHELL_ENABLE_GL
   if (!IsValid() || !external_texture_callback_) {
     return false;
   }
   shell_->GetPlatformView()->RegisterTexture(
       std::make_unique<EmbedderExternalTextureGL>(texture,
                                                   external_texture_callback_));
+#endif
+
   return true;
 }
 
 bool EmbedderEngine::UnregisterTexture(int64_t texture) {
+#ifdef SHELL_ENABLE_GL
   if (!IsValid() || !external_texture_callback_) {
     return false;
   }
   shell_->GetPlatformView()->UnregisterTexture(texture);
+#endif
+
   return true;
 }
 
 bool EmbedderEngine::MarkTextureFrameAvailable(int64_t texture) {
+#ifdef SHELL_ENABLE_GL
   if (!IsValid() || !external_texture_callback_) {
     return false;
   }
   shell_->GetPlatformView()->MarkTextureFrameAvailable(texture);
+#endif
+
   return true;
 }
 
@@ -232,7 +249,7 @@ bool EmbedderEngine::PostRenderThreadTask(const fml::closure& task) {
     return false;
   }
 
-  shell_->GetTaskRunners().GetGPUTaskRunner()->PostTask(task);
+  shell_->GetTaskRunners().GetRasterTaskRunner()->PostTask(task);
   return true;
 }
 
@@ -247,7 +264,35 @@ bool EmbedderEngine::RunTask(const FlutterTask* task) {
                                 task->task);
 }
 
-const Shell& EmbedderEngine::GetShell() const {
+bool EmbedderEngine::PostTaskOnEngineManagedNativeThreads(
+    std::function<void(FlutterNativeThreadType)> closure) const {
+  if (!IsValid() || closure == nullptr) {
+    return false;
+  }
+
+  const auto trampoline = [closure](FlutterNativeThreadType type,
+                                    fml::RefPtr<fml::TaskRunner> runner) {
+    runner->PostTask([closure, type] { closure(type); });
+  };
+
+  // Post the task to all thread host threads.
+  const auto& task_runners = shell_->GetTaskRunners();
+  trampoline(kFlutterNativeThreadTypeRender,
+             task_runners.GetRasterTaskRunner());
+  trampoline(kFlutterNativeThreadTypeWorker, task_runners.GetIOTaskRunner());
+  trampoline(kFlutterNativeThreadTypeUI, task_runners.GetUITaskRunner());
+  trampoline(kFlutterNativeThreadTypePlatform,
+             task_runners.GetPlatformTaskRunner());
+
+  // Post the task to all worker threads.
+  auto vm = shell_->GetDartVM();
+  vm->GetConcurrentMessageLoop()->PostTaskToAllWorkers(
+      [closure]() { closure(kFlutterNativeThreadTypeWorker); });
+
+  return true;
+}
+
+Shell& EmbedderEngine::GetShell() {
   FML_DCHECK(shell_);
   return *shell_.get();
 }
